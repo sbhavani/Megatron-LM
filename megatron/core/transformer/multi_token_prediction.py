@@ -222,7 +222,8 @@ class MTPLossLoggingHelper:
 
         tracker = MTPLossLoggingHelper.tracker
         if "values" not in tracker:
-            tracker["values"] = torch.zeros(num_layers, device=torch.cuda.current_device())
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            tracker["values"] = torch.zeros(num_layers, device=device)
         tracker["values"][layer_number] += loss.detach()
         tracker["reduce_group"] = reduce_group
         tracker["avg_group"] = avg_group

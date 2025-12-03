@@ -44,7 +44,8 @@ class Utils:
                 f'Initializing torch.distributed with rank: {Utils.rank}, '
                 f'world_size: {Utils.world_size}'
             )
-            torch.cuda.set_device(Utils.rank % torch.cuda.device_count())
+            if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                torch.cuda.set_device(Utils.rank % torch.cuda.device_count())
             init_method = 'tcp://'
             master_ip = os.getenv('MASTER_ADDR', 'localhost')
             master_port = os.getenv('MASTER_PORT', '6000')
@@ -60,8 +61,9 @@ class Utils:
             store = PrefixStore("default_pg", store)
             Utils.store = store
 
+            backend = 'gloo' if torch.cuda.device_count() == 0 else 'nccl'
             torch.distributed.init_process_group(
-                backend='nccl', world_size=Utils.world_size, rank=Utils.rank, store=store
+                backend=backend, world_size=Utils.world_size, rank=Utils.rank, store=store
             )
 
             torch.distributed.barrier()

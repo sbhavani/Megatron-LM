@@ -193,12 +193,13 @@ class CudaRNGStatesTracker:
             self.states_[name] = new_state
         else:
             # Get the current rng state.
-            orig_rng_state = torch.cuda.get_rng_state()
-            # Set the new state and store it.
-            torch.cuda.manual_seed(seed)
-            self.states_[name] = torch.cuda.get_rng_state()
-            # Reset rng state to what it was.
-            _set_cuda_rng_state(orig_rng_state)
+            if torch.cuda.is_available():
+                orig_rng_state = torch.cuda.get_rng_state()
+                # Set the new state and store it.
+                torch.cuda.manual_seed(seed)
+                self.states_[name] = torch.cuda.get_rng_state()
+                # Reset rng state to what it was.
+                _set_cuda_rng_state(orig_rng_state)
 
     @contextlib.contextmanager
     def fork(self, name=_MODEL_PARALLEL_RNG_TRACKER_NAME):
@@ -367,7 +368,8 @@ def model_parallel_cuda_manual_seed(
     )
     _CUDA_RNG_STATE_TRACKER.reset()
     # Set the default state.
-    torch.cuda.manual_seed(data_parallel_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(data_parallel_seed)
     _CUDA_RNG_STATE_TRACKER.add(_DATA_PARALLEL_RNG_TRACKER_NAME, data_parallel_seed)
 
     # and model parallel state.

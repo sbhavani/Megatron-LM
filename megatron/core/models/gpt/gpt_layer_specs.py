@@ -207,13 +207,13 @@ def get_gpt_layer_with_transformer_engine_spec(
 
     if use_kitchen:
         assert HAVE_KITCHEN
-        backend: BackendSpecProvider = KitchenSpecProvider(fallback=TESpecProvider())
+        backend: BackendSpecProvider = KitchenSpecProvider(fallback=TESpecProvider() if HAVE_TE else LocalSpecProvider())
         if use_te_op_fuser:
             raise AssertionError("use_te_op_fuser not compatible with using kitchen in mlp.")
         if use_te_activation_func:
             raise AssertionError("use_te_activation_func not compatible with using kitchen.")
     else:
-        backend = TESpecProvider()
+        backend = TESpecProvider() if HAVE_TE else LocalSpecProvider()
 
     mlp = get_mlp_module_spec_for_backend(
         backend=backend,
@@ -618,9 +618,9 @@ def get_gpt_mtp_block_spec(
     """GPT Multi-Token Prediction (MTP) block spec."""
     if use_transformer_engine:
         backend: BackendSpecProvider = (
-            KitchenSpecProvider(fallback=TESpecProvider())
+            KitchenSpecProvider(fallback=TESpecProvider() if HAVE_TE else LocalSpecProvider())
             if config.use_kitchen
-            else TESpecProvider()
+            else TESpecProvider() if HAVE_TE else LocalSpecProvider()
         )
     else:
         backend = (

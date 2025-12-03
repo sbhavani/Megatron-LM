@@ -74,15 +74,15 @@ def tmp_path_dist_ckpt(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="session", autouse=True)
 def ensure_test_data():
-    """Ensure test data is available at /opt/data by downloading if necessary."""
-    data_path = Path("/opt/data")
+    """Ensure test data is available at ./test_data by downloading if necessary."""
+    data_path = Path("./test_data")
 
     # Check if data directory exists and has content
     if not data_path.exists() or not any(data_path.iterdir()):
-        print("Test data not found at /opt/data. Downloading...")
+        print("Test data not found at ./test_data. Downloading...")
 
         try:
-            # Download assets to /opt/data
+            # Download assets to ./test_data
             get_oldest_release_and_assets(assets_dir=str(data_path))
 
             print("Test data downloaded successfully.")
@@ -94,7 +94,7 @@ def ensure_test_data():
             print(f"Failed to download test data: {e}")
             # Don't fail the tests, just warn
     else:
-        print("Test data already available at /opt/data")
+        print("Test data already available at ./test_data")
 
 
 @pytest.fixture(autouse=True)
