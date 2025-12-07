@@ -77,6 +77,7 @@ MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
+    --optimizer adamw
     --micro-batch-size $MICRO_BATCH_SIZE
     --global-batch-size $GLOBAL_BATCH_SIZE
     --train-samples 1953125000
