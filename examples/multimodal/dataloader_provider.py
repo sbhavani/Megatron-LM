@@ -39,7 +39,6 @@ def datasets_provider(task_encoder,worker_config=None):
         worker_config=worker_config,
         packing_buffer_size=args.packing_buffer_size,
         handler=print_error_handler,
-        image_decode="pil",
     )
 
     val_datasets = get_val_datasets(
@@ -51,7 +50,6 @@ def datasets_provider(task_encoder,worker_config=None):
         worker_config=worker_config,
         packing_buffer_size=args.packing_buffer_size,
         handler=print_error_handler,
-        image_decode="pil",
     )
     val_datasets_without_source_datasets = [
         # Limit the dataset to eval_iters * num_microbatches

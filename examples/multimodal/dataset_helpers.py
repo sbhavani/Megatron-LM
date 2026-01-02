@@ -24,6 +24,7 @@ from megatron.energon import (
     DefaultTaskEncoder,
     OCRSample,
     Sample,
+    SampleDecoder,
     SimilarityInterleavedSample,
     VQASample,
     MultiChoiceVQASample
@@ -149,6 +150,7 @@ class TaskEncoder(DefaultTaskEncoder[OCRSample, OCRSample, ImageTaskBatchPacked,
         self
     ):
         super().__init__()
+        self.decoder = SampleDecoder(image_decode="pil")
 
         self.args = get_args()
 
