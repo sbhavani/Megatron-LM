@@ -370,6 +370,8 @@ class ModelParallelConfig:
 
         if self.autocast_dtype is None:
             if self.pipeline_dtype is not None:
+                # Use pipeline_dtype if available, as it likely represents the intended
+                # low-precision compute type better than params_dtype (which might be fp32 master weights).
                 self.autocast_dtype = self.pipeline_dtype
             else:
                 self.autocast_dtype = self.params_dtype
