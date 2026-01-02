@@ -372,6 +372,21 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # [Module 9: BiasDropoutFusion]
         self.mlp_bda = build_module(submodules.mlp_bda)
 
+        # DeepNorm scaling initialization
+        if self.config.deepnorm:
+            beta = self.config.deepnorm_beta
+            # Scale Self Attention Weights
+            if hasattr(self.self_attention, "apply_deepnorm_scaling_to_weights"):
+                self.self_attention.apply_deepnorm_scaling_to_weights(beta)
+
+            # Scale Cross Attention Weights
+            if hasattr(self.cross_attention, "apply_deepnorm_scaling_to_weights"):
+                self.cross_attention.apply_deepnorm_scaling_to_weights(beta)
+
+            # Scale MLP Weights
+            if hasattr(self.mlp, "apply_deepnorm_scaling_to_weights"):
+                self.mlp.apply_deepnorm_scaling_to_weights(beta)
+
         self.recompute_input_layernorm = False
         self.recompute_pre_mlp_layernorm = False
         self.recompute_mlp = False
@@ -536,9 +551,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # self attention module.
             hidden_states = attention_output_with_bias[0]
         else:
+            residual_coef = self.config.deepnorm_alpha if self.config.deepnorm else 1.0
             with self.bias_dropout_add_exec_handler():
                 hidden_states = self.self_attn_bda(self.training, self.config.bias_dropout_fusion)(
-                    attention_output_with_bias, residual, self.hidden_dropout
+                    attention_output_with_bias,
+                    residual,
+                    self.hidden_dropout,
+                    residual_coef=residual_coef,
                 )
         nvtx_range_pop(suffix="self_attn_bda")
 
@@ -561,9 +580,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
 
         # TODO: could we move `bias_dropout_add_exec_handler` itself
         # inside the module provided in the `bias_dropout_add_spec` module?
+        residual_coef = self.config.deepnorm_alpha if self.config.deepnorm else 1.0
         with self.bias_dropout_add_exec_handler():
             hidden_states = self.cross_attn_bda(self.training, self.config.bias_dropout_fusion)(
-                attention_output_with_bias, residual, self.hidden_dropout
+                attention_output_with_bias,
+                residual,
+                self.hidden_dropout,
+                residual_coef=residual_coef,
             )
 
         return hidden_states, context
@@ -659,9 +682,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
             # MLP module.
             hidden_states = mlp_output_with_bias[0]
         else:
+            residual_coef = self.config.deepnorm_alpha if self.config.deepnorm else 1.0
             with self.bias_dropout_add_exec_handler():
                 hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
-                    mlp_output_with_bias, residual, self.hidden_dropout
+                    mlp_output_with_bias,
+                    residual,
+                    self.hidden_dropout,
+                    residual_coef=residual_coef,
                 )
         nvtx_range_pop(suffix="mlp_bda")
 

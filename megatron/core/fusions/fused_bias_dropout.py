@@ -8,7 +8,7 @@ from megatron.core.jit import jit_fuser
 # pylint: disable=missing-function-docstring
 
 
-def _bias_dropout_add_func(x_with_bias, residual, prob, training):
+def _bias_dropout_add_func(x_with_bias, residual, prob, training, residual_coef=1.0):
     # type: (Tuple[Tensor, Optional[Tensor]], Tensor, float, bool) -> Tensor
     # NOTE: Previously, the argument `bias` used to be passed as
     # `bias.expand_as(residual)` when the `bias_dropout_func` is called from the
@@ -24,6 +24,7 @@ def _bias_dropout_add_func(x_with_bias, residual, prob, training):
         and not x.requires_grad
         and not residual.requires_grad
         and (bias is None or not bias.requires_grad)
+        and residual_coef == 1.0
     )
 
     # If we want to train mixed precision, then the output of this function
@@ -46,36 +47,42 @@ def _bias_dropout_add_func(x_with_bias, residual, prob, training):
         if inplace:
             out.add_(residual)
         else:
-            out = residual + out
+            out = residual * residual_coef + out
         return out
     else:
         out = torch.nn.functional.dropout(x, p=prob, training=training, inplace=inplace)
         if inplace:
             out.add_(residual)
         else:
-            out = residual + out
+            out = residual * residual_coef + out
         return out
 
 
 def bias_dropout_add_unfused(training):
-    def _bias_dropout_add(x_with_bias, residual, prob):
-        return _bias_dropout_add_func(x_with_bias, residual, prob, training)
+    def _bias_dropout_add(x_with_bias, residual, prob, residual_coef=1.0):
+        return _bias_dropout_add_func(x_with_bias, residual, prob, training, residual_coef)
 
     return _bias_dropout_add
 
 
 @jit_fuser
 def bias_dropout_add_fused_train(
-    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float
+    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]],
+    residual: torch.Tensor,
+    prob: float,
+    residual_coef: float = 1.0,
 ) -> torch.Tensor:
-    return _bias_dropout_add_func(x_with_bias, residual, prob, True)
+    return _bias_dropout_add_func(x_with_bias, residual, prob, True, residual_coef)
 
 
 @jit_fuser
 def bias_dropout_add_fused_inference(
-    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float
+    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]],
+    residual: torch.Tensor,
+    prob: float,
+    residual_coef: float = 1.0,
 ) -> torch.Tensor:
-    return _bias_dropout_add_func(x_with_bias, residual, prob, False)
+    return _bias_dropout_add_func(x_with_bias, residual, prob, False, residual_coef)
 
 
 def get_bias_dropout_add(training, fused):

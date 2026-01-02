@@ -1347,6 +1347,75 @@ class SelfAttention(Attention):
 
         return weight_updated
 
+    def apply_deepnorm_scaling_to_weights(self, beta: float):
+        """
+        Apply DeepNorm scaling to the weights of the self attention layer.
+        This involves scaling the value projection and the output projection weights by beta.
+        """
+        if beta == 1.0:
+            return
+
+        # Scale Output Projection
+        if hasattr(self.linear_proj.weight, 'main_param'):
+            self.linear_proj.weight.main_param.data.mul_(beta)
+        self.linear_proj.weight.data.mul_(beta)
+
+        # Scale Value Projection
+        # Value projection is part of linear_qkv.
+        # We need to slice linear_qkv weight and scale only the V part.
+
+        # Reshape to (g, query_projection_size + 2 * kv_projection_size, -1)
+        # Note: This logic assumes that the layout is [Q1 K1 V1 | Q2 K2 V2 | ...]
+        # which is consistent with get_query_key_value_tensors logic.
+
+        with torch.no_grad():
+            weight = self.linear_qkv.weight
+            if hasattr(weight, 'main_param'):
+                target_weight = weight.main_param.data
+            else:
+                target_weight = weight.data
+
+            # Reshape to identify heads/groups
+            # Shape: [num_groups, (head_dim * heads_per_group) + 2 * head_dim, input_dim]
+            # where heads_per_group = num_q_heads_per_partition / num_kv_heads_per_partition (which is num_query_groups)
+            # Wait, self.num_query_groups_per_partition
+
+            out_features = target_weight.size(0)
+            in_features = target_weight.size(1)
+
+            # Check consistency
+            expected_out = self.num_query_groups_per_partition * (
+                (self.num_attention_heads_per_partition // self.num_query_groups_per_partition + 2)
+                * self.hidden_size_per_attention_head
+            )
+            assert out_features == expected_out, f"Weight shape {out_features} mismatch expected {expected_out}"
+
+            weight_reshaped = target_weight.view(
+                self.num_query_groups_per_partition,
+                -1,
+                in_features
+            )
+
+            # The last part of each group block is V.
+            # Block size = (n_q_heads_per_group + 2) * head_dim
+            # V starts at: (n_q_heads_per_group + 1) * head_dim
+            # V length: head_dim
+
+            head_dim = self.hidden_size_per_attention_head
+            n_q_heads_per_group = self.num_attention_heads_per_partition // self.num_query_groups_per_partition
+
+            v_start = (n_q_heads_per_group + 1) * head_dim
+
+            # Scale V
+            weight_reshaped[:, v_start:, :].mul_(beta)
+
+            # If main_param existed, we updated it. We should also update .weight.data if it's different/detached,
+            # but usually main_param is the source of truth for optimizer.
+            # If we updated main_param, we should ideally sync it back or update both.
+            # In Megatron, main_param is usually the fp32 master weight.
+            if hasattr(weight, 'main_param'):
+                 self.linear_qkv.weight.data.copy_(target_weight)
+
 
 class CrossAttention(Attention):
     """Cross-attention layer class
@@ -1432,3 +1501,60 @@ class CrossAttention(Attention):
         query = query.view(*new_tensor_shape)
 
         return query, key, value
+
+    def apply_deepnorm_scaling_to_weights(self, beta: float):
+        """
+        Apply DeepNorm scaling to the weights of the cross attention layer.
+        This involves scaling the value projection and the output projection weights by beta.
+        """
+        if beta == 1.0:
+            return
+
+        # Scale Output Projection
+        if hasattr(self.linear_proj.weight, 'main_param'):
+            self.linear_proj.weight.main_param.data.mul_(beta)
+        self.linear_proj.weight.data.mul_(beta)
+
+        # Scale Value Projection (linear_kv)
+        # linear_kv maps to [K, V]
+        # Layout: [K1 V1 | K2 V2 | ...] ?
+        # Actually CrossAttention linear_kv projects to 2 * kv_projection_size.
+        # Structure: "Attention heads [sk, b, h] --> [sk, b, (np * 2 * hn)]"
+        # Then split into 2: key, value.
+        # tensor_parallel.split_tensor_along_last_dim(mixed_kv, 2)
+        # This implies [K, V] are concatenated along the last dimension *after* calculation?
+        # No, linear_kv weight shape is [2 * total_kv_dim, input_dim].
+        # The output is [batch, seq, 2*total_kv_dim].
+        # In tensor parallel, it splits output dimension.
+        # So each rank has [2 * local_kv_dim, input_dim].
+        # And usually it is [K_local, V_local] or interleaved?
+        # get_query_key_value_tensors says:
+        # mixed_kv.view(..., num_heads_per_partition, 2 * head_dim)
+        # (key, value) = split_tensor_along_last_dim(mixed_kv, 2)
+        # This implies for each head, we have [head_dim_k, head_dim_v].
+        # So weights are interleaved: [h1_k, h1_v, h2_k, h2_v, ...]
+
+        with torch.no_grad():
+            weight = self.linear_kv.weight
+            if hasattr(weight, 'main_param'):
+                target_weight = weight.main_param.data
+            else:
+                target_weight = weight.data
+
+            out_features = target_weight.size(0)
+            in_features = target_weight.size(1)
+
+            head_dim = self.hidden_size_per_attention_head
+
+            # View as [num_heads, 2 * head_dim, input_dim]
+            weight_reshaped = target_weight.view(
+                self.num_attention_heads_per_partition,
+                2 * head_dim,
+                in_features
+            )
+
+            # V is the second half of the 2nd dim
+            weight_reshaped[:, head_dim:, :].mul_(beta)
+
+            if hasattr(weight, 'main_param'):
+                 self.linear_kv.weight.data.copy_(target_weight)

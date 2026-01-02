@@ -189,6 +189,15 @@ class TransformerConfig(ModelParallelConfig):
     normalization: str = "LayerNorm"
     """Which norm to use for normalization layers, valid options are `LayerNorm` and `RMSNorm`."""
 
+    deepnorm: bool = False
+    """Use DeepNorm configuration."""
+
+    deepnorm_alpha: float = 1.0
+    """Alpha parameter for DeepNorm."""
+
+    deepnorm_beta: float = 1.0
+    """Beta parameter for DeepNorm."""
+
     qk_layernorm: bool = False
     """Whether to apply `normalization` type of normalization to the query and key embeddings."""
 
