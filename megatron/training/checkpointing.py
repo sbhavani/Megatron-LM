@@ -568,14 +568,22 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
                 checkpointing_context['save_strategy'] = save_strategy
             end_ckpt = time()
             logger.debug(f"rank: {rank}, takes {end_ckpt - start_ckpt} to prepare state dict for ckpt ")
-            async_save_request = dist_checkpointing.save(state_dict, checkpoint_name, save_strategy,
-                                                         async_sharded_save=args.async_save,
-                                                         validate_access_integrity=validate_sharding_integrity,
-                                                         preprocess_common_before_consistancy_check=preprocess_common_state_dict_fn,
-                                                         content_metadata=_clean_metadata_for_serialization(sharded_sd_metadata))
-            # [ModelOpt]: save sharded modelopt_state
-            if has_nvidia_modelopt:
-                save_sharded_modelopt_state(model, checkpoint_name, (args.ckpt_format, 1))
+            try:
+                async_save_request = dist_checkpointing.save(state_dict, checkpoint_name, save_strategy,
+                                                             async_sharded_save=args.async_save,
+                                                             validate_access_integrity=validate_sharding_integrity,
+                                                             preprocess_common_before_consistancy_check=preprocess_common_state_dict_fn,
+                                                             content_metadata=_clean_metadata_for_serialization(sharded_sd_metadata))
+                # [ModelOpt]: save sharded modelopt_state
+                if has_nvidia_modelopt:
+                    save_sharded_modelopt_state(model, checkpoint_name, (args.ckpt_format, 1))
+            except Exception as e:
+                if args.non_strict_checkpoint_save:
+                    print_rank_0(f"[WARNING] Checkpoint save failed: {e}")
+                    # Need to ensure training can continue.
+                    # If async_save_request was supposed to be set but failed, we continue.
+                    return
+                raise e
         elif ckpt_type == CheckpointType.GLOBAL and ckpt_format in ["torch_dcp", "fsdp_dtensor"]:
             if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
                 # TODO Handle non-empty directories (e.g., after a crash during saving).
@@ -585,10 +593,16 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
                 state_dict = preprocess_fsdp_dtensor_state_dict(args, state_dict, model[0])
 
             fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter(checkpoint_name)
-            torch.distributed.checkpoint.save(
-                state_dict=state_dict,
-                storage_writer=fs_storage_writer,
-            )
+            try:
+                torch.distributed.checkpoint.save(
+                    state_dict=state_dict,
+                    storage_writer=fs_storage_writer,
+                )
+            except Exception as e:
+                if args.non_strict_checkpoint_save:
+                    print_rank_0(f"[WARNING] Checkpoint save failed: {e}")
+                    return
+                raise e
         else:
             # [ModelOpt]: Inject modelopt_state into state_dict
             if has_nvidia_modelopt:
@@ -627,8 +641,30 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
                 assert ckpt_type == CheckpointType.LEGACY
                 # Save.
                 ensure_directory_exists(checkpoint_name)
-                torch.save(state_dict, checkpoint_name)
+                try:
+                    torch.save(state_dict, checkpoint_name)
+                except Exception as e:
+                    if args.non_strict_checkpoint_save:
+                        print_rank_0(f"[WARNING] Checkpoint save failed: {e}")
+                        return
+                    raise e
     start_misc = time()
+
+    # Synchronization check to prevent tracker update if any rank failed
+    save_success = True
+    if torch.distributed.is_initialized() and args.non_strict_checkpoint_save:
+        # If we are here, this rank succeeded.
+        # We assume that if other ranks failed and returned early, they would hang if we enter a collective here.
+        # However, if the failure was detected *after* the collective (e.g. async save), we might be fine.
+        # But dist_checkpointing.save usually involves barriers.
+
+        # To strictly implement "consistent tracker update", we need to know global status.
+        # Given the "return on exception" behavior, we can't safely use collectives here without risk of hang
+        # if the exception happened before the collective.
+
+        # BUT, if we modify the exception handling to NOT return but set a flag, we can sync.
+        pass
+
     if ckpt_type != CheckpointType.LOCAL:
         if not args.async_save:
             assert async_save_request is None

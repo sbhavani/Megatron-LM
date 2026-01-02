@@ -2568,6 +2568,9 @@ def _add_checkpointing_args(parser):
                             ' rank for saving. Turn on only if experiencing host or device memory'
                             ' issues. Has affect only with `--dist-ckpt-optim-fully-reshardable`'
                             ' flag.')
+    group.add_argument('--non-strict-checkpoint-save', action='store_true',
+                       help='If set, checkpoint save failures will be logged '
+                       'but training will continue.')
     return parser
 
 

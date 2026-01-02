@@ -51,7 +51,13 @@ def maybe_finalize_async_save(blocking: bool = False, terminate=False):
     if blocking and not is_empty_async_queue():
         print_rank_0('Unfinalized async checkpoint saves. Finalizing them synchronously now.')
 
-    _async_calls_queue.maybe_finalize_async_calls(blocking, no_dist=False)
+    try:
+        _async_calls_queue.maybe_finalize_async_calls(blocking, no_dist=False)
+    except Exception as e:
+        if args.non_strict_checkpoint_save:
+            print_rank_0(f"[WARNING] Checkpoint finalize failed: {e}")
+        else:
+            raise e
 
     if terminate:
         _async_calls_queue.close()
