@@ -369,7 +369,10 @@ class ModelParallelConfig:
                 )
 
         if self.autocast_dtype is None:
-            self.autocast_dtype = self.params_dtype
+            if self.pipeline_dtype is not None:
+                self.autocast_dtype = self.pipeline_dtype
+            else:
+                self.autocast_dtype = self.params_dtype
 
         if self.defer_embedding_wgrad_compute and self.pipeline_model_parallel_size == 1:
             raise ValueError(
