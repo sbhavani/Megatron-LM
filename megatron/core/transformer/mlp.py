@@ -267,6 +267,25 @@ class MLP(MegatronModule):
         self.linear_fc2.backward_dw()
         self.linear_fc1.backward_dw()
 
+    def apply_deepnorm_scaling_to_weights(self, beta: float):
+        """
+        Apply DeepNorm scaling to the weights of the MLP.
+        This involves scaling the FC1 and FC2 weights by beta.
+        """
+        if beta == 1.0:
+            return
+
+        with torch.no_grad():
+            # Scale FC1
+            if hasattr(self.linear_fc1.weight, 'main_param'):
+                self.linear_fc1.weight.main_param.data.mul_(beta)
+            self.linear_fc1.weight.data.mul_(beta)
+
+            # Scale FC2
+            if hasattr(self.linear_fc2.weight, 'main_param'):
+                self.linear_fc2.weight.main_param.data.mul_(beta)
+            self.linear_fc2.weight.data.mul_(beta)
+
 
 # pylint: disable=missing-function-docstring
 def apply_swiglu_sharded_factory(
