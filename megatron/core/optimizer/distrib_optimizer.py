@@ -1725,7 +1725,6 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
                     key=f'{prefix}.{state_key}.{sharded_metadata.key}',
                     data=state_ten,
                     dtype=state_ten.dtype,
-                    flattened_range=item_slice,
                     replica_id=replica_id,
                 )
                 if isinstance(sharded_metadata, ShardedTensorFactory):
