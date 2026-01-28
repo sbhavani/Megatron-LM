@@ -274,9 +274,15 @@ class GPTDataset(MegatronDataset):
         # For padded sequences, mask the loss
         loss_mask[labels == self._pad_token_id] = 0.0
 
-        # For padded sequences, ensure the embedding layer can map the token ID
-        tokens[tokens == self._pad_token_id] = 0
-        labels[labels == self._pad_token_id] = 0
+        # For padded sequences, ensure the embedding layer can map the token ID.
+        # Only replace pad tokens with 0 when _pad_token_id is the sentinel value (-1),
+        # which indicates either no valid pad token or a collision with other special tokens.
+        # When _pad_token_id is a valid token ID (>= 0), keep it as-is to maintain
+        # consistency between training and inference for models like Qwen/DeepSeek
+        # where pad_token_id != 0. See GitHub issue #2170.
+        if self._pad_token_id < 0:
+            tokens[tokens == self._pad_token_id] = 0
+            labels[labels == self._pad_token_id] = 0
 
         # Batch padding sequence so we mask the loss
         if idx is None:
