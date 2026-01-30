@@ -65,6 +65,7 @@ user-guide/features/pipeline_parallel_layout
 user-guide/features/megatron_energon
 user-guide/features/megatron_rl
 user-guide/features/tokenizers
+user-guide/features/nemo_evaluator
 ```
 
 ```{toctree}
