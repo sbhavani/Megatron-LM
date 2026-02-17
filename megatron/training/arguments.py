@@ -489,6 +489,13 @@ def validate_args(args, defaults={}):
         assert any(elt is not None
                    for elt in [args.train_data_path, args.valid_data_path, args.test_data_path]) is False or \
             args.per_split_data_args_path is None
+        if args.split is not None:
+            warn_rank_0(
+                "Ignoring --split because per-split data arguments are provided "
+                "(--train-data-path/--valid-data-path/--test-data-path or "
+                "--per-split-data-args-path)."
+            )
+            args.split = None
 
     if args.phase_transition_iterations:
         args.phase_transition_iterations = sorted(
