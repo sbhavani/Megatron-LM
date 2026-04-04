@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 
 from megatron.core.model_parallel_config import ModelParallelConfig
+from megatron.core.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
 from megatron.core.utils import nvtx_decorator
 
 # Types
@@ -143,24 +144,61 @@ class P2PCommunicator:
     tensor exchanges between consecutive stages in the pipeline.
     """
 
-    def __init__(self, pp_group: dist.ProcessGroup, config: ModelParallelConfig):
+    def __init__(
+        self,
+        pp_group: dist.ProcessGroup,
+        config: ModelParallelConfig,
+        pipeline_ranks: Optional[List[int]] = None,
+    ):
         # Basic attrs
         self.pp_group = pp_group
         self.config = config
+        self.pipeline_ranks = pipeline_ranks
 
-        world_size = self.pp_group.size()
-        curr_rank_in_pg = self.pp_group.rank()
+        if self.pipeline_ranks:
+            rank = dist.get_rank()
+            if rank not in self.pipeline_ranks:
+                raise ValueError(
+                    f"Current rank {rank} not in pipeline_ranks {self.pipeline_ranks}"
+                )
 
-        next_rank_pg = (curr_rank_in_pg + 1) % world_size
-        prev_rank_pg = (curr_rank_in_pg - 1) % world_size
+            rank_idx = self.pipeline_ranks.index(rank)
+            world_size = len(self.pipeline_ranks)
 
-        self.next_rank: int | None = dist.get_global_rank(self.pp_group, next_rank_pg)
-        self.prev_rank: int | None = dist.get_global_rank(self.pp_group, prev_rank_pg)
+            next_rank_idx = (rank_idx + 1) % world_size
+            prev_rank_idx = (rank_idx - 1) % world_size
+
+            self.next_rank = self.pipeline_ranks[next_rank_idx]
+            self.prev_rank = self.pipeline_ranks[prev_rank_idx]
+        else:
+            world_size = self.pp_group.size()
+            curr_rank_in_pg = self.pp_group.rank()
+
+            next_rank_pg = (curr_rank_in_pg + 1) % world_size
+            prev_rank_pg = (curr_rank_in_pg - 1) % world_size
+
+            self.next_rank: int | None = dist.get_global_rank(self.pp_group, next_rank_pg)
+            self.prev_rank: int | None = dist.get_global_rank(self.pp_group, prev_rank_pg)
+
         self.virtual_pipeline_model_parallel_size = (
             config.virtual_pipeline_model_parallel_size
             if config.virtual_pipeline_model_parallel_size is not None
             else None
         )
+
+    @property
+    def is_first_stage(self):
+        """Return True if in the first pipeline model-parallel stage, False otherwise."""
+        if self.pipeline_ranks:
+            return dist.get_rank() == self.pipeline_ranks[0]
+        return is_pp_first_stage(self.pp_group)
+
+    @property
+    def is_last_stage(self):
+        """Return True if in the last pipeline-model-parallel stage, False otherwise."""
+        if self.pipeline_ranks:
+            return dist.get_rank() == self.pipeline_ranks[-1]
+        return is_pp_last_stage(self.pp_group)
 
     def _communicate_shapes(self, tensor_send_next, tensor_send_prev, recv_prev, recv_next):
         """Communicate tensor shapes between stages. Used to communicate
