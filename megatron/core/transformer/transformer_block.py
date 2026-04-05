@@ -555,7 +555,13 @@ class TransformerBlock(GraphableMegatronModule, MegatronModule):
             layer_idx = 0
             while layer_idx < self.num_layers_per_pipeline_rank:
                 hidden_states, context = checkpoint_handler(
-                    custom(layer_idx, layer_idx + self.config.recompute_num_layers)
+                    custom(
+                        layer_idx,
+                        min(
+                            self.num_layers_per_pipeline_rank,
+                            layer_idx + self.config.recompute_num_layers,
+                        ),
+                    )
                 )
 
                 # Feature extraction for uniform recompute: collect at end of each chunk
