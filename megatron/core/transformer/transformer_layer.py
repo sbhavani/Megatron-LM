@@ -1220,22 +1220,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
                     device=torch.cuda.current_device(),
                 )
 
-            if not is_te_min_version("1.10.0"):
-                # TE version < 1.10.0 does not support keyword arguments with CUDA graph.
-                for k, v in cudagraph_kwargs.items():
-                    if k == "attention_mask":
-                        if v is not None:
-                            cudagraph_args.append(v)
-                            cudagraph_kwargs[k] = None
-                        else:
-                            cudagraph_args.append(
-                                get_zero_attention_mask(
-                                    hidden_states.size(0), hidden_states.size(1)
-                                )
-                            )
-                    elif k != 'is_first_microbatch':
-                        assert v is None, "Keyword Arguments not supported with CUDA graph."
-            elif (
+            if (
                 'attention_mask' in cudagraph_kwargs and cudagraph_kwargs['attention_mask'] is None
             ):
                 # The attention_mask can be None when there is no padding to the input sequence.

@@ -1826,18 +1826,6 @@ class TransformerConfig(ModelParallelConfig):
             )
 
         if self.num_moe_experts and self.fp8:
-            # TE version below 1.7.0 will raise Error when handle zeros tokens for expert
-            if not is_te_min_version("1.7.0.dev0"):
-                raise ValueError(
-                    "Only transformer-engine>=1.7.0 supports MoE FP8 training, "
-                    f"but your version is {get_te_version()}."
-                )
-
-            if self.moe_grouped_gemm and not is_te_min_version("1.11.0"):
-                raise ValueError(
-                    "Only transformer-engine>=1.11.0 supports FP8 grouped gemm, "
-                    f"but your version is {get_te_version()}."
-                )
 
         if self.moe_router_padding_for_fp8:
             # enable moe_router_padding_for_quantization

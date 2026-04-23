@@ -493,10 +493,6 @@ def get_mlp_module_spec(
             " and will be removed soon. Please update your code accordingly."
         )
     if use_te_op_fuser:
-        if not is_te_min_version("1.13.0"):
-            raise ValueError(
-                "Transformer Engine operation-based API requires Transformer Engine 1.13+"
-            )
         if num_experts is not None:
             raise ValueError(
                 "Transformer Engine operation-based API does not support mixture-of-experts"

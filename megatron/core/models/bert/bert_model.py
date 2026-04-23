@@ -204,36 +204,14 @@ class BertModel(LanguageModule):
             attn_mask_type = self.transformer_layer_spec.submodules.self_attention.params[
                 'attn_mask_type'
             ]
-            # For TE >= 1.10 (We always use padding mask and use b11s)
-            if is_te_min_version("1.10.0"):
-                attn_mask_dimensions = "b11s"
-                if attn_mask_type != AttnMaskType.padding:
-                    warnings.warn(
-                        f'For TE versions >= 1.10 , flash/fused/unfused support padding mask. Setting attention mask from {attn_mask_type} to padding'
-                    )
-                    self.transformer_layer_spec.submodules.self_attention.params[
-                        'attn_mask_type'
-                    ] = AttnMaskType.padding
-            # For 1.7 >= TE < 1.10 flash and fused path use padding mask with b11s and unfused path uses arbitrary mask with b1ss
-            elif is_te_min_version("1.7.0"):
-                if attention_backend in [AttnBackend.flash, AttnBackend.fused, AttnBackend.auto]:
-                    attn_mask_dimensions = "b11s"
-                else:
-                    if attn_mask_type != AttnMaskType.arbitrary:
-                        warnings.warn(
-                            f'For TE versions >= 1.7 but < 1.10 , unfused path supports only arbitrary mask. Setting attention mask from {attn_mask_type} to arbitray'
-                        )
-                        self.transformer_layer_spec.submodules.self_attention.params[
-                            'attn_mask_type'
-                        ] = AttnMaskType.arbitrary
-                    attn_mask_dimensions = "b1ss"
-            # For TE < 1.7 we only support unfused attention with b1ss and padding mask
-            else:
-                attn_mask_dimensions = "b1ss"
-                assert not (attention_backend in [AttnBackend.flash, AttnBackend.fused]), (
-                    "Flash and fused attention is not supported with transformer engine version "
-                    "< 1.7. Set --attention-backend to unfused or leave it to be default (auto) or upgrade transformer engine >= 1.7"
+            attn_mask_dimensions = "b11s"
+            if attn_mask_type != AttnMaskType.padding:
+                warnings.warn(
+                    f'For TE versions >= 1.10 , flash/fused/unfused support padding mask. Setting attention mask from {attn_mask_type} to padding'
                 )
+                self.transformer_layer_spec.submodules.self_attention.params[
+                    'attn_mask_type'
+                ] = AttnMaskType.padding
 
         return attn_mask_dimensions
 

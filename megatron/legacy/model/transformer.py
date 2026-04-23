@@ -1165,12 +1165,9 @@ class ParallelTransformer(MegatronModule):
             global transformer_engine
             import transformer_engine
 
-            if core.utils.is_te_min_version("0.8.0"):
-                self.transformer_engine_v_0_8 = True
-            if core.utils.is_te_min_version("0.10.0"):
-                self.transformer_engine_v_0_10 = True
-            if core.utils.is_te_min_version("0.11.0"):
-                self.transformer_engine_v_0_11 = True
+            self.transformer_engine_v_0_8 = True
+            self.transformer_engine_v_0_10 = True
+            self.transformer_engine_v_0_11 = True
 
             assert not args.squared_relu, ("TransformerEngine does not support squared "
                                            "relu activation.")

@@ -60,12 +60,6 @@ class TESpecProvider(BackendSpecProvider):
         self, rms_norm: bool = False, for_qk: bool = False, has_residual: bool = False
     ) -> LayerNormBuilder:
         """Which module to use for layer norm"""
-        if for_qk and not is_te_min_version("1.9.0"):
-            # TENorm significantly harms convergence when used
-            # for QKLayerNorm if TE Version < 1.9;
-            # we instead use the Apex implementation.
-            return FusedLayerNorm
-        # Keep returning a class so this path stays aligned with build_module's class handling.
         return _TENormWithResidual if has_residual else TENorm
 
     def core_attention(self) -> type:
@@ -84,20 +78,6 @@ class TESpecProvider(BackendSpecProvider):
                 ),
             )
         else:
-            if not is_te_min_version("1.7.0.dev0"):
-                warnings.warn(
-                    "Only transformer-engine>=1.7.0 supports MoE experts, "
-                    f"but your version is {get_te_version()}. "
-                    "Use local linear implementation instead."
-                )
-                return partial(
-                    SequentialMLP,
-                    submodules=MLPSubmodules(
-                        linear_fc1=ColumnParallelLinear,
-                        linear_fc2=RowParallelLinear,
-                        activation_func=self.activation_func(),
-                    ),
-                )
             return partial(
                 SequentialMLP,
                 submodules=MLPSubmodules(

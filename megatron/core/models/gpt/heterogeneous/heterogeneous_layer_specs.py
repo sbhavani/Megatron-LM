@@ -83,13 +83,7 @@ def _get_qk_layernorm(use_te: bool, normalization: str):
     ln_impl = LNImpl if normalization == "LayerNorm" else WrappedTorchNorm
 
     if use_te:
-        if is_te_min_version("1.9.0"):
-            # TENorm significantly harms convergence when used
-            # for QKLayerNorm if TE Version < 1.9;
-            # we instead use the Apex implementation.
-            qk_norm = TENorm
-        else:
-            qk_norm = ln_impl
+        qk_norm = TENorm
     else:
         qk_norm = ln_impl
 

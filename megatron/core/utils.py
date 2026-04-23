@@ -2051,10 +2051,7 @@ def get_thd_batch_on_this_cp_rank(
     cp_size = parallel_state.get_context_parallel_world_size() if cp_size is None else cp_size
     cp_rank = parallel_state.get_context_parallel_rank() if cp_rank is None else cp_rank
     if cp_size > 1:  # slice batch along sequence dimension for context parallelism
-        assert tex is not None and is_te_min_version("1.10.0"), (
-            "Please update Transformer Engine to >= 1.10 to use "
-            "Context Parallel with THD format data"
-        )
+        assert tex is not None, "Transformer Engine is required for Context Parallel with THD format data"
         index = tex.thd_get_partitioned_indices(
             cu_seqlens_padded, batch['tokens'].size(1), cp_size, cp_rank
         )

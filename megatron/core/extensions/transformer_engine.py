@@ -299,13 +299,12 @@ def _get_should_context_be_quantized_params(
 def _get_extra_te_kwargs(config: TransformerConfig):
     extra_transformer_engine_kwargs = {"params_dtype": config.params_dtype}
 
-    if is_te_min_version("0.12.0"):
-        if config.use_cpu_initialization:
-            extra_transformer_engine_kwargs["device"] = "cpu"
-        elif config.init_model_with_meta_device:
-            extra_transformer_engine_kwargs["device"] = "meta"
-        else:
-            extra_transformer_engine_kwargs["device"] = torch.cuda.current_device()
+    if config.use_cpu_initialization:
+        extra_transformer_engine_kwargs["device"] = "cpu"
+    elif config.init_model_with_meta_device:
+        extra_transformer_engine_kwargs["device"] = "meta"
+    else:
+        extra_transformer_engine_kwargs["device"] = torch.cuda.current_device()
     return extra_transformer_engine_kwargs
 
 
@@ -395,7 +394,7 @@ def split_te_layernorm_column_parallel_linear(
     return norm_layer, linear_layer
 
 
-if HAVE_TE and is_te_min_version("1.13.0"):
+if HAVE_TE:
 
     class TEActivationOp:
         """
@@ -433,7 +432,7 @@ else:
     TEActivationOp = None
 
 
-if HAVE_TE and is_te_min_version("1.13.0"):
+if HAVE_TE:
 
     class TEFusedResidualRMSNorm(te.pytorch.RMSNorm):
         """
@@ -737,40 +736,26 @@ class TELinear(te.pytorch.Linear):
                 "for this layer."
             )
 
-        if is_te_min_version("0.8.0"):
-            if self.config.tp_comm_overlap and parallel_mode != "duplicated":
-                if is_te_min_version("1.5.0"):
-                    # Use old overlap flags if they were supplied instead
-                    extra_kwargs["ub_overlap_ag"] = (
-                        self.config.tp_comm_overlap_ag
-                        if hasattr(self.config, "tp_comm_overlap_ag")
-                        else self.config.tp_comm_split_ag or self.config.tp_comm_atomic_ag
-                    )
-                    extra_kwargs["ub_overlap_rs"] = (
-                        self.config.tp_comm_overlap_rs
-                        if hasattr(self.config, "tp_comm_overlap_rs")
-                        else self.config.tp_comm_split_rs or self.config.tp_comm_atomic_rs
-                    )
-                    # Disable ub overlap for experts.
-                    if is_expert:
-                        extra_kwargs["ub_overlap_ag"] = False
-                        extra_kwargs["ub_overlap_rs"] = False
-                else:
-                    extra_kwargs["ub_split_ag"] = self.config.tp_comm_split_ag
-                    extra_kwargs["ub_atomic_gemm_ag"] = self.config.tp_comm_atomic_ag
-                    extra_kwargs["ub_split_rs"] = self.config.tp_comm_split_rs
-                    extra_kwargs["ub_atomic_gemm_rs"] = self.config.tp_comm_atomic_rs
-                    # Disable ub overlap for experts.
-                    if is_expert:
-                        extra_kwargs["ub_split_ag"] = False
-                        extra_kwargs["ub_atomic_gemm_ag"] = False
-                        extra_kwargs["ub_split_rs"] = False
-                        extra_kwargs["ub_atomic_gemm_rs"] = False
-                if is_te_min_version("1.0.0", check_equality=False):
-                    assert (
-                        tp_comm_buffer_name is not None
-                    ), "Buffer name should be set to configure communication overlap settings"
-                    extra_kwargs["ub_name"] = tp_comm_buffer_name
+        if self.config.tp_comm_overlap and parallel_mode != "duplicated":
+            # Use old overlap flags if they were supplied instead
+            extra_kwargs["ub_overlap_ag"] = (
+                self.config.tp_comm_overlap_ag
+                if hasattr(self.config, "tp_comm_overlap_ag")
+                else self.config.tp_comm_split_ag or self.config.tp_comm_atomic_ag
+            )
+            extra_kwargs["ub_overlap_rs"] = (
+                self.config.tp_comm_overlap_rs
+                if hasattr(self.config, "tp_comm_overlap_rs")
+                else self.config.tp_comm_split_rs or self.config.tp_comm_atomic_rs
+            )
+            # Disable ub overlap for experts.
+            if is_expert:
+                extra_kwargs["ub_overlap_ag"] = False
+                extra_kwargs["ub_overlap_rs"] = False
+            assert (
+                tp_comm_buffer_name is not None
+            ), "Buffer name should be set to configure communication overlap settings"
+            extra_kwargs["ub_name"] = tp_comm_buffer_name
 
         if symmetric_ar_type is not None:
             assert is_torch_min_version("2.7.0a0"), "Must have at least torch version 2.7 or higher"
@@ -792,8 +777,7 @@ class TELinear(te.pytorch.Linear):
                 rng_tracker_name = get_data_parallel_rng_tracker_name()
             else:
                 rng_tracker_name = None
-        if is_te_min_version("1.7.0"):
-            extra_kwargs["rng_tracker_name"] = rng_tracker_name
+        extra_kwargs["rng_tracker_name"] = rng_tracker_name
 
         te_parallel_mode = parallel_mode
         tp_group_for_te = tp_group
@@ -968,47 +952,33 @@ class TELayerNormColumnParallelLinear(te.pytorch.LayerNormLinear):
             else:
                 raise RuntimeError("Only TE with version >=2.3.0 supports delay_wgrad_compute now.")
 
-        # Only Transformer-Engine version >= 0.11.0 supports `RMSNorm`
-        if is_te_min_version("0.11.0"):
-            extra_kwargs["normalization"] = self.config.normalization
-        elif self.config.normalization != "LayerNorm":
-            te_version = get_te_version()
-            raise ValueError(
-                f"Transformer Engine v{te_version} does not support {self.config.normalization}."
+        extra_kwargs["normalization"] = self.config.normalization
+
+        if self.config.tp_comm_overlap:
+            extra_kwargs["ub_bulk_wgrad"] = self.config.tp_comm_bulk_wgrad
+            extra_kwargs["ub_bulk_dgrad"] = self.config.tp_comm_bulk_dgrad
+            # Use old overlap flags if they were supplied instead
+            extra_kwargs["ub_overlap_ag"] = (
+                self.config.tp_comm_overlap_ag
+                if hasattr(self.config, "tp_comm_overlap_ag")
+                else self.config.tp_comm_split_ag or self.config.tp_comm_atomic_ag
             )
+            extra_kwargs["ub_overlap_rs_dgrad"] = (
+                self.config.tp_comm_overlap_rs_dgrad
+                if hasattr(self.config, "tp_comm_overlap_rs_dgrad")
+                else False
+            )
+            if tp_comm_buffer_name == "qkv" and self.config.tp_comm_overlap_disable_qkv:
+                extra_kwargs["ub_overlap_ag"] = False
+                extra_kwargs["ub_overlap_rs_dgrad"] = False
 
-        if is_te_min_version("0.8.0"):
-            if self.config.tp_comm_overlap:
-                extra_kwargs["ub_bulk_wgrad"] = self.config.tp_comm_bulk_wgrad
-                extra_kwargs["ub_bulk_dgrad"] = self.config.tp_comm_bulk_dgrad
-                if is_te_min_version("1.5.0", check_equality=False):
-                    # Use old overlap flags if they were supplied instead
-                    extra_kwargs["ub_overlap_ag"] = (
-                        self.config.tp_comm_overlap_ag
-                        if hasattr(self.config, "tp_comm_overlap_ag")
-                        else self.config.tp_comm_split_ag or self.config.tp_comm_atomic_ag
-                    )
-                    if is_te_min_version("1.6.0.dev0", check_equality=False):
-                        extra_kwargs["ub_overlap_rs_dgrad"] = (
-                            self.config.tp_comm_overlap_rs_dgrad
-                            if hasattr(self.config, "tp_comm_overlap_rs_dgrad")
-                            else False
-                        )
-                    if tp_comm_buffer_name == "qkv" and self.config.tp_comm_overlap_disable_qkv:
-                        extra_kwargs["ub_overlap_ag"] = False
-                        extra_kwargs["ub_overlap_rs_dgrad"] = False
-
-                    if tp_comm_buffer_name == "fc1" and self.config.tp_comm_overlap_disable_fc1:
-                        extra_kwargs["ub_overlap_ag"] = False
-                        extra_kwargs["ub_overlap_rs_dgrad"] = False
-                else:
-                    extra_kwargs["ub_atomic_gemm_ag"] = self.config.tp_comm_atomic_ag
-                    extra_kwargs["ub_split_ag"] = self.config.tp_comm_split_ag
-                if is_te_min_version("1.0.0", check_equality=False):
-                    assert (
-                        tp_comm_buffer_name is not None
-                    ), "Buffer name should be set to configure communication overlap settings"
-                    extra_kwargs["ub_name"] = tp_comm_buffer_name
+            if tp_comm_buffer_name == "fc1" and self.config.tp_comm_overlap_disable_fc1:
+                extra_kwargs["ub_overlap_ag"] = False
+                extra_kwargs["ub_overlap_rs_dgrad"] = False
+            assert (
+                tp_comm_buffer_name is not None
+            ), "Buffer name should be set to configure communication overlap settings"
+            extra_kwargs["ub_name"] = tp_comm_buffer_name
 
         if self.config.symmetric_ar_type is not None:
             assert is_torch_min_version("2.7.0a0"), "Must have at least torch version 2.7 or higher"
@@ -1398,15 +1368,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
             )
 
         extra_kwargs: dict[str, Any] = {}
-        if is_te_min_version("0.11.0"):
-            extra_kwargs["num_gqa_groups"] = self.config.num_query_groups
-        elif self.config.num_query_groups != self.config.num_attention_heads:
-            raise ValueError(
-                f"Transformer Engine v{get_te_version()} does not support Grouped Query Attention, "
-                f"use a newer version of Transformer Engine. "
-                f"(num_query_groups ({self.config.num_query_groups}) != "
-                f"num_attention_heads ({self.config.num_attention_heads}))"
-            )
+        extra_kwargs["num_gqa_groups"] = self.config.num_query_groups
 
         if pg_collection is None:
             pg_collection = ProcessGroupCollection(
@@ -1427,19 +1389,13 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
                 ), "TEDotProductAttention pg_collection must have hierarchical cp pg"
         self._tp_group = pg_collection.tp
 
-        if is_te_min_version("0.10.0"):
-            extra_kwargs["attention_type"] = attention_type
-            # older version don't need attention_type
+        extra_kwargs["attention_type"] = attention_type
 
-        if is_te_min_version("0.12.0", check_equality=False):
-            self.te_forward_mask_type = True
+        self.te_forward_mask_type = True
 
         # This check is important as CP config can be disabled while having a valid CP group
         # Example - Disabling CP for encoder while a valid CP group exists for decoder
         if self.config.context_parallel_size > 1:
-            assert is_te_min_version(
-                "1.0.0"
-            ), "Only Transformer-Engine version >= 1.0.0 supports context parallelism!"
             if getattr(TEDotProductAttention, "cp_stream") is None:
                 TEDotProductAttention.cp_stream = torch.cuda.Stream()
             extra_kwargs["cp_group"] = pg_collection.cp
@@ -1447,20 +1403,15 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
                 pg_collection.cp
             )
             extra_kwargs["cp_stream"] = TEDotProductAttention.cp_stream
-            if is_te_min_version("1.10.0"):
-                if cp_comm_type is None:
-                    extra_kwargs["cp_comm_type"] = "p2p"
-                elif cp_comm_type == "a2a+p2p":
-                    assert is_te_min_version("1.12.0"), (
-                        f"Transformer-Engine v{get_te_version()} must be >= 1.12.0 to support"
-                        "hierarchical cp commucation."
-                    )
-                    extra_kwargs["cp_comm_type"] = "a2a+p2p"
-                    extra_kwargs["cp_group"] = get_hierarchical_context_parallel_groups(
-                        check_initialized=False
-                    )
-                else:
-                    extra_kwargs["cp_comm_type"] = cp_comm_type
+            if cp_comm_type is None:
+                extra_kwargs["cp_comm_type"] = "p2p"
+            elif cp_comm_type == "a2a+p2p":
+                extra_kwargs["cp_comm_type"] = "a2a+p2p"
+                extra_kwargs["cp_group"] = get_hierarchical_context_parallel_groups(
+                    check_initialized=False
+                )
+            else:
+                extra_kwargs["cp_comm_type"] = cp_comm_type
 
         if self.config.deterministic_mode:
             if int(os.getenv("NVTE_ALLOW_NONDETERMINISTIC_ALGO", "1")) != 0:
@@ -1473,23 +1424,14 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
         if is_layer_window_attention(
             config.window_size, config.window_attn_skip_freq, layer_number
         ):
-            # Check version
-            assert is_te_min_version("1.2.0"), (
-                f"Transformer-Engine v{get_te_version()} must be >= 1.2.0 to support"
-                "sliding window attention."
-            )
             extra_kwargs["window_size"] = config.window_size
 
-        if is_te_min_version("1.10.0"):
-            # TE 1.10.0 introduces the ability to set the different k and v channels
-            kv_channels = (
-                (k_channels, v_channels)
-                if k_channels is not None and v_channels is not None
-                else self.config.kv_channels
-            )
-            extra_kwargs["softmax_scale"] = softmax_scale
-        else:
-            kv_channels = self.config.kv_channels
+        kv_channels = (
+            (k_channels, v_channels)
+            if k_channels is not None and v_channels is not None
+            else self.config.kv_channels
+        )
+        extra_kwargs["softmax_scale"] = softmax_scale
 
         if self.config.softmax_type != "vanilla":
             assert is_te_min_version("2.8.0"), (
@@ -1594,10 +1536,6 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
 
         attention_bias_kwargs = {}
         if attention_bias is not None:
-            assert is_te_min_version("1.2.0"), (
-                f"Transformer-Engine v{get_te_version()} must be >= 1.2.0 to support"
-                "`attention_bias`."
-            )
             attention_bias_kwargs = dict(
                 core_attention_bias_type="post_scale_bias", core_attention_bias=attention_bias
             )
@@ -1609,7 +1547,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
                 #  need to change mask type for SWA inference decode stage.
                 attn_mask_type = AttnMaskType.causal_bottom_right
         if self.te_forward_mask_type:
-            if qkv_format == "thd" and is_te_min_version("1.7.0"):
+            if qkv_format == "thd":
                 # thd format uses flash attention with cuDNN kernel which requires is_padding=True,
                 # so the only acceptable mask types are `padding_causal` and `padding`. These do not
                 # necessarily indicate there are padded tokens in the sequence.
@@ -1669,7 +1607,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
         )
 
 
-if HAVE_TE and is_te_min_version("1.9.0.dev0"):
+if HAVE_TE:
 
     class TEGroupedLinear(te.pytorch.GroupedLinear):
         """
@@ -1838,10 +1776,8 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
                 extra_fp8_variables = state_list[0]["extra_fp8_variables"]
                 extra_fp8_variables["num_gemms"] = self.num_gemms
                 extra_state = {"extra_fp8_variables": extra_fp8_variables}
-                # TE 2.0 adds recipe in extra_state
-                if is_te_min_version("2.0.0"):
-                    self.fp8_meta["recipe"] = state_list[0]["recipe"]
-                    extra_state["recipe"] = self.fp8_meta["recipe"]
+                self.fp8_meta["recipe"] = state_list[0]["recipe"]
+                extra_state["recipe"] = self.fp8_meta["recipe"]
                 # Only delayed scaling has global fp8 meta tensors. We're not using
                 # self.fp8_meta["recipe"].delayed() because it's available in TE 2.0 and later.
                 if isinstance(self.fp8_meta["recipe"], te.common.recipe.DelayedScaling):
@@ -1863,20 +1799,6 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
                             ).view(self.fp8_meta["recipe"].amax_history_len, -1),
                         }
                     )
-                    # TE 2.0 removes scale_inv_fwd and scale_inv_bwd
-                    if not is_te_min_version("2.0.0"):
-                        extra_state.update(
-                            {
-                                "scale_inv_fwd": torch.cat(
-                                    [state["scale_inv_fwd"].view(-1, 1) for state in state_list],
-                                    dim=1,
-                                ).view(-1),
-                                "scale_inv_bwd": torch.cat(
-                                    [state["scale_inv_bwd"].view(-1, 1) for state in state_list],
-                                    dim=1,
-                                ).view(-1),
-                            }
-                        )
                 state_dict[f"{prefix}_extra_state"] = self._encode_extra_state(extra_state)
 
             self._register_load_state_dict_pre_hook(merge_extra_states, with_module=True)
@@ -1913,14 +1835,9 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
             return out, None
 
         def _encode_extra_state(self, state):
-            # TE 2.0 changed the format of extra_state to be a byte tensor
-            if is_te_min_version("2.0.0"):
-                torch.cuda.synchronize()
-                state_serialized = bytearray(pickle.dumps(state))
-                state_serialized = torch.frombuffer(state_serialized, dtype=torch.uint8)
-            else:
-                state_serialized = io.BytesIO()
-                torch.save(state, state_serialized)
+            torch.cuda.synchronize()
+            state_serialized = bytearray(pickle.dumps(state))
+            state_serialized = torch.frombuffer(state_serialized, dtype=torch.uint8)
             return state_serialized
 
         def _decode_extra_state(self, state):
@@ -1947,9 +1864,7 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
             extra_fp8_variables["num_gemms"] = 1
             for gemm_idx in range(self.num_gemms):
                 tmp_state = {"extra_fp8_variables": extra_fp8_variables}
-                # TE 2.0 adds recipe in extra_state
-                if is_te_min_version("2.0.0"):
-                    tmp_state["recipe"] = state["recipe"]
+                tmp_state["recipe"] = state["recipe"]
                 # Only delayed scaling has global fp8 meta tensors. We're not using
                 # self.fp8_meta["recipe"].delayed() because it's available in TE 2.0 and later.
                 if isinstance(self.fp8_meta["recipe"], te.common.recipe.DelayedScaling):
@@ -1965,14 +1880,6 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
                             )[:, :, gemm_idx],
                         }
                     )
-                    # TE 2.0 removes scale_inv_fwd and scale_inv_bwd
-                    if not is_te_min_version("2.0.0"):
-                        tmp_state.update(
-                            {
-                                "scale_inv_fwd": state["scale_inv_fwd"].view(3, -1)[:, gemm_idx],
-                                "scale_inv_bwd": state["scale_inv_bwd"].view(2, -1)[:, gemm_idx],
-                            }
-                        )
                 extra_states.append(self._encode_extra_state(tmp_state))
             return extra_states
 
@@ -2143,7 +2050,7 @@ else:
     TERowParallelGroupedLinear = None  # type: ignore[assignment, misc]
 
 
-if HAVE_TE and is_te_min_version("1.13.0"):
+if HAVE_TE:
 
     class TEFusedMLP(MLP):
         """MLP wrapper using Transformer Engine's operation-based API."""
@@ -2454,9 +2361,8 @@ class TEDelayedScaling(te.common.recipe.DelayedScaling):
             )
 
         extra_kwargs = _get_extra_te_kwargs(config)
-        if is_te_min_version("1.6.0.dev0"):
-            extra_kwargs["fp8_dpa"] = config.fp8_dot_product_attention
-            extra_kwargs["fp8_mha"] = config.fp8_multi_head_attention
+        extra_kwargs["fp8_dpa"] = config.fp8_dot_product_attention
+        extra_kwargs["fp8_mha"] = config.fp8_multi_head_attention
         if get_te_version() < PkgVersion("1.8.0"):
             extra_kwargs["interval"] = config.fp8_interval
         elif config.fp8_interval != 1:
@@ -2519,19 +2425,14 @@ def te_checkpoint(
 
     from transformer_engine.pytorch.distributed import checkpoint
 
-    if is_te_min_version("1.5.0"):
-        return checkpoint(
-            forward_func,
-            *args,
-            distribute_saved_activations=distribute_saved_activations,
-            get_rng_state_tracker=get_rng_state_tracker,
-            tp_group=tp_group,
-            **kwargs,
-        )
-    else:
-        return checkpoint(
-            forward_func, distribute_saved_activations, get_rng_state_tracker, tp_group, *args
-        )
+    return checkpoint(
+        forward_func,
+        *args,
+        distribute_saved_activations=distribute_saved_activations,
+        get_rng_state_tracker=get_rng_state_tracker,
+        tp_group=tp_group,
+        **kwargs,
+    )
 
 
 try:
@@ -2568,13 +2469,9 @@ try:
                 double_buffering,
                 retain_pinned_cpu_buffers=retain_pinned_cpu_buffers,
             )
-        elif is_te_min_version("1.10.0.dev0"):
-            context, sync_func = _get_cpu_offload_context(
-                enabled, num_layers, model_layers, activation_offloading, weight_offloading
-            )
         else:
             context, sync_func = _get_cpu_offload_context(
-                enabled, num_layers, activation_offloading, weight_offloading
+                enabled, num_layers, model_layers, activation_offloading, weight_offloading
             )
 
         return context, sync_func
@@ -2634,7 +2531,7 @@ try:
                 cp_rank=cp_rank,
                 interleaved=interleaved,
             )
-        elif is_te_min_version("1.12.0", check_equality=True):
+        else:
             return apply_rotary_pos_emb(
                 t,
                 freqs,
@@ -2643,11 +2540,6 @@ try:
                 cu_seqlens=cu_seqlens,
                 cp_size=cp_size,
                 cp_rank=cp_rank,
-            )
-        else:
-            assert cp_size == 1, "Only TE >= 1.12 supports RoPE fusion for THD format with CP."
-            return apply_rotary_pos_emb(
-                t, freqs, tensor_format="thd", fused=True, cu_seqlens=cu_seqlens
             )
 
 except ImportError:

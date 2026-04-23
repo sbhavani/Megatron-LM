@@ -598,12 +598,7 @@ class _CudagraphReplayNode(torch.autograd.Function):
                         m.fp8_meta["fp8_group"] = FP8GlobalStateManager.get_fp8_group()
                         m.fp8_meta["recipe"] = FP8GlobalStateManager.get_fp8_recipe()
 
-                        if is_te_min_version("1.13.0"):
-                            FP8GlobalStateManager.add_fp8_tensors_to_global_buffer(m.fp8_meta)
-                        else:
-                            FP8GlobalStateManager.add_fp8_tensors_to_global_buffer(
-                                m.fp8_meta, fp8_weights=m._get_fp8_params()
-                            )
+                        FP8GlobalStateManager.add_fp8_tensors_to_global_buffer(m.fp8_meta)
 
             # Note that FP8GlobalStateManager.is_first_fp8_module() is inacccurate as each
             # layer may be in its own fp8 context, when the fp8 recipe != delayed_scaling
@@ -804,12 +799,7 @@ class _CudaGraphRunner(torch.nn.Module):
 
             saved_fp8_tensors = None
             if self.fp8_enabled:
-                if is_te_min_version("1.13.0"):
-                    saved_fp8_tensors = save_fp8_tensors([self.base_module], self.fp8_recipe)
-                else:
-                    saved_fp8_tensors = save_fp8_tensors(
-                        [self.base_module], self.fp8_recipe.amax_history_len
-                    )
+                saved_fp8_tensors = save_fp8_tensors([self.base_module], self.fp8_recipe)
             elif self.fp4_enabled:
                 if is_te_min_version("2.7.0.dev0"):
                     saved_fp8_tensors = save_fp8_tensors([self.base_module], self.fp4_recipe)
@@ -1945,22 +1935,14 @@ class TECudaGraphHelper:
             )
 
             _sample_kwargs = {}
-            if is_te_min_version("1.10.0"):
-                # te.make_graphed_callables() accepts keyword arguments since 1.10.0.
-                hidden_states = static_inputs.pop("hidden_states")
-                _sample_args = (hidden_states,)
-                if contains_self_attn:
-                    rotary_pos_emb = get_rotary_pos_emb(chunk_of_the_layer, hidden_states)
-                    if rotary_pos_emb is not None:
-                        static_inputs["rotary_pos_emb"] = rotary_pos_emb
-                _sample_kwargs = static_inputs
-            elif contains_self_attn:
-                _sample_args = (
-                    static_inputs.pop("hidden_states"),
-                    static_inputs.pop("attention_mask"),
-                )
-            else:
-                _sample_args = (static_inputs.pop("hidden_states"),)
+            # te.make_graphed_callables() accepts keyword arguments since 1.10.0.
+            hidden_states = static_inputs.pop("hidden_states")
+            _sample_args = (hidden_states,)
+            if contains_self_attn:
+                rotary_pos_emb = get_rotary_pos_emb(chunk_of_the_layer, hidden_states)
+                if rotary_pos_emb is not None:
+                    static_inputs["rotary_pos_emb"] = rotary_pos_emb
+            _sample_kwargs = static_inputs
             return _sample_args, _sample_kwargs
 
         # Calculate the starting index of each chunk in callables for future use.
@@ -2224,7 +2206,7 @@ class TECudaGraphHelper:
                     get_fp8_recipe(self.config) if self.config.fp8 else get_fp4_recipe(self.config)
                 )
                 kwargs['fp8_weight_caching'] = True
-                if is_te_min_version("1.14.0") and parallel_state.model_parallel_is_initialized():
+                if parallel_state.model_parallel_is_initialized():
                     kwargs['fp8_group'] = parallel_state.get_amax_reduction_group(
                         with_context_parallel=True, tp_only_amax_red=self.config.tp_only_amax_red
                     )

@@ -254,8 +254,6 @@ def initialize_rng_tracker(
     # Get the base tracker class
     base_tracker = None
     if HAVE_TE and use_te_rng_tracker:
-        if not is_te_min_version("1.5.0"):
-            raise RuntimeError("use_te_rng_tracker requires TransformerEngine version >= 1.5")
 
         class TECudaRNGStatesTracker(transformer_engine.pytorch.distributed.CudaRNGStatesTracker):
             """Wraps TransformerEngine's CudaRNGStatesTracker so that it is

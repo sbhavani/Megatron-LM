@@ -245,28 +245,13 @@ def _initialize_tp_communicators():
             ub_cfgs=ub_cfgs,
             bootstrap_backend=args.tp_comm_bootstrap_backend,
         )
-    elif is_te_min_version("1.9.0"):
-        # The process group with the target bootstrap backend is created in Transformer Engine.
+    else:
         te_module.base.initialize_ub(
             shape=input_shape,
             tp_size=args.tensor_model_parallel_size,
             use_fp8=(args.fp8 is not None),
             ub_cfgs=ub_cfgs,
             bootstrap_backend=args.tp_comm_bootstrap_backend,
-        )
-    else:
-        if args.tp_comm_bootstrap_backend != 'mpi':
-            warnings.warn(
-                f"Transformer Engine v{get_te_version()} supports only MPI bootstrap backend."
-            )
-        # Create a MPI process group to help with TP communication overlap bootstrap.
-        create_group(backend='mpi', group_desc='TP_BOOTSTRAP_GROUP_MPI')
-
-        te_module.base.initialize_ub(
-            shape=input_shape,
-            tp_size=args.tensor_model_parallel_size,
-            use_fp8=(args.fp8 is not None),
-            ub_cfgs=ub_cfgs,
         )
 
 

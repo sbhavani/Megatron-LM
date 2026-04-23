@@ -2492,7 +2492,6 @@ class ParamAndGradBuffer:
                             m.to_empty(device=self.device, recurse=False)
                             if (
                                 HAVE_TE
-                                and is_te_min_version("0.9.0")
                                 and not isinstance(m, TransformerEngineBaseModule)
                             ):
                                 reset_context_args["with_cuda_rng_tracker"] = True

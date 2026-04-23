@@ -237,10 +237,7 @@ class PartitionAdapter:
         if packed_seq_params is None or getattr(packed_seq_params, 'qkv_format', 'sbhd') == 'sbhd':
             batch = get_batch_on_this_cp_rank(batch)
         else:
-            assert _HAVE_TEX and is_te_min_version("1.10.0"), (
-                "Please update Transformer Engine to >= 1.10 "
-                "to use Context Parallel with THD format data"
-            )
+            assert _HAVE_TEX, "Transformer Engine is required for Context Parallel with THD format data"
             assert self.cfg.cp_group is not None
             cp_size = get_pg_size(self.cfg.cp_group)
             cp_rank = get_pg_rank(self.cfg.cp_group)

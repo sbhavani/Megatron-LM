@@ -40,12 +40,7 @@ except ImportError:
 # Check if Transformer Engine has class for fp8 tensors.
 HAVE_TE_FP8_TENSOR_CLASS = False
 if HAVE_TE:
-    if is_te_min_version("2.0"):
-        # In TE2.x, QuantizedTensor is the base class for all different type of fp8 tensors,
-        # including fp8 tensor for delayed scaling, current scaling and mxfp8, etc.
-        from transformer_engine.pytorch.tensor import QuantizedTensor as FP8_TENSOR_CLASS
-    else:
-        from transformer_engine.pytorch.float8_tensor import Float8Tensor as FP8_TENSOR_CLASS
+    from transformer_engine.pytorch.tensor import QuantizedTensor as FP8_TENSOR_CLASS
 
     HAVE_TE_FP8_TENSOR_CLASS = True
 else:
@@ -112,10 +107,7 @@ def is_mxfp8tensor(tensor: torch.Tensor) -> bool:
 
 def dequantize_fp8_tensor(fp8_tensor: torch.Tensor) -> torch.Tensor:
     """Dequantize a fp8 tensor to a higher precision tensor."""
-    if is_te_min_version("2.0"):
-        return fp8_tensor.dequantize()
-    else:
-        return fp8_tensor.from_float8()
+    return fp8_tensor.dequantize()
 
 
 def _resolve_callable_from_python_import_path(dotted_path: str):
@@ -267,7 +259,7 @@ if HAVE_TE and is_te_min_version("2.2"):
     def _correct_amax_history_if_needed_impl(model: List[torch.nn.Module]) -> None:
         pass
 
-elif HAVE_TE and is_te_min_version("2.0"):
+elif HAVE_TE:
     # Supported TE versions: 2.0
     from transformer_engine.pytorch.tensor import QuantizedTensor
     from transformer_engine.pytorch.tensor.float8_tensor import Float8Tensor
@@ -358,103 +350,6 @@ elif HAVE_TE and is_te_min_version("2.0"):
 
     def _correct_amax_history_if_needed_impl(model: List[torch.nn.Module]) -> None:
         pass
-
-elif HAVE_TE and is_te_min_version("1.0"):
-    # Supported TE versions: 1.0 - 1.14
-    from transformer_engine.pytorch.cpp_extensions import cast_to_fp8
-    from transformer_engine.pytorch.float8_tensor import Float8Tensor
-
-    def _modify_underlying_storage_impl(tensor: Float8Tensor, new_raw_data: torch.Tensor) -> None:
-        old_raw_data = tensor._data
-        assert old_raw_data.dtype == new_raw_data.dtype
-        new_raw_data.detach().copy_(old_raw_data)
-        tensor._data = new_raw_data
-        del old_raw_data
-
-    def _quantize_param_shard_impl(
-        model_params: List[Float8Tensor],
-        main_params: List[torch.Tensor],
-        start_offsets: List[int],
-        data_parallel_group: torch.distributed.ProcessGroup,
-        fsdp_shard_model_params: Optional[List[torch.Tensor]] = None,
-    ) -> None:
-        # Avoid circular import
-        from megatron.core.optimizer.optimizer import _multi_tensor_copy_this_to_that
-
-        if len(model_params) == 0:
-            return
-
-        if fsdp_shard_model_params is None:
-            fsdp_shard_model_params = [None] * len(model_params)
-
-        for model_param, main_param, start_offset, fsdp_shard_model_param in zip(
-            model_params, main_params, start_offsets, fsdp_shard_model_params
-        ):
-            if main_param is None:
-                continue
-
-            if fsdp_shard_model_param is not None:
-                shard_model_param = fsdp_shard_model_param
-            else:
-                shard_model_param = model_param._data.view(-1)[
-                    start_offset : start_offset + main_param.numel()
-                ]
-
-            # When not using --fp8-param-gather, the main_param (fp32) is first cast to bf16/fp16,
-            # and then cast to fp8 during forward.
-            # Although it's not necessary when --fp8-param-gather is enabled, we still keep this
-            # logic to keep numerical consistency. So here cast the main_param to model_param.dtype.
-            main_param = main_param.to(model_param.dtype)
-            cast_to_fp8(
-                main_param.view(1, -1),
-                model_param._fp8_meta["scaling_fwd"],
-                model_param._fp8_meta_index,
-                model_param._fp8_dtype,
-                out=shard_model_param.view(1, -1),
-            )
-
-        amaxes = []
-        scales = []
-        scale_invs = []
-        for model_param in model_params:
-            fp8_meta = model_param._fp8_meta["scaling_fwd"]
-            fp8_meta_index = model_param._fp8_meta_index
-            amaxes.append(fp8_meta.amax_history[0][fp8_meta_index].view(1))
-            scales.append(fp8_meta.scale[fp8_meta_index].view(1))
-            scale_invs.append(model_param._scale_inv.view(1))
-            model_param._reset_caches()
-
-        dummy_overflow_buf = torch.tensor([0], dtype=torch.int, device="cuda")
-
-        # Update scaling factors.
-        packed_scales = torch.empty(len(scales), dtype=torch.float32, device=scales[0].device)
-        packed_scale_views = [packed_scales[i].view(1) for i in range(len(scales))]
-        _multi_tensor_copy_this_to_that(scales, packed_scale_views, dummy_overflow_buf)
-        torch.reciprocal(packed_scales, out=packed_scales)
-        _multi_tensor_copy_this_to_that(packed_scale_views, scale_invs, dummy_overflow_buf)
-
-        # Reduce amaxes.
-        # Note: Assume each param has a separate amax.
-        packed_amaxes = torch.empty(len(amaxes), dtype=torch.float32, device=amaxes[0].device)
-        packed_amax_views = [packed_amaxes[i].view(1) for i in range(len(amaxes))]
-        _multi_tensor_copy_this_to_that(amaxes, packed_amax_views, dummy_overflow_buf)
-        torch.distributed.all_reduce(
-            packed_amaxes, op=torch.distributed.ReduceOp.MAX, group=data_parallel_group
-        )
-        _multi_tensor_copy_this_to_that(packed_amax_views, amaxes, dummy_overflow_buf)
-
-    def _correct_amax_history_if_needed_impl(model: List[torch.nn.Module]) -> None:
-        for model_module in model:
-            for param in model_module.parameters():
-                if is_float8tensor(param) and param._fp8_meta is not None:
-                    fp8_meta = param._fp8_meta["scaling_fwd"]
-                    fp8_meta_index = param._fp8_meta_index
-                    if hasattr(param, "get_high_precision_init_val"):
-                        fp8_meta.amax_history[0][fp8_meta_index].copy_(
-                            param.get_high_precision_init_val().abs().max()
-                        )
-                    else:
-                        fp8_meta.amax_history[0][fp8_meta_index] = 0
 
 else:
     # Fallback impl if TE version is invalid or TE is not installed.

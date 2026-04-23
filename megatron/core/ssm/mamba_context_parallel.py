@@ -394,10 +394,7 @@ def _undo_attention_load_balancing(
         reordered_chunks = [chunks[i] for i in order]
         return torch.cat(reordered_chunks, dim=0)
     else:
-        assert tex is not None and is_te_min_version("1.10.0"), (
-            "Please update Transformer Engine to >= 1.10 to use "
-            "Context Parallel with THD format data"
-        )
+        assert tex is not None, "Transformer Engine is required for Context Parallel with THD format data"
         if packed_seq_params.cu_seqlens_q_padded is not None:
             cu_seqlens = packed_seq_params.cu_seqlens_q_padded
         else:
@@ -432,10 +429,7 @@ def _redo_attention_load_balancing(
         reordered_chunks = [chunks[i] for i in order]
         return torch.cat(reordered_chunks, dim=0)
     else:
-        assert tex is not None and is_te_min_version("1.10.0"), (
-            "Please update Transformer Engine to >= 1.10 to use "
-            "Context Parallel with THD format data"
-        )
+        assert tex is not None, "Transformer Engine is required for Context Parallel with THD format data"
         if packed_seq_params.cu_seqlens_q_padded is not None:
             cu_seqlens = packed_seq_params.cu_seqlens_q_padded
         else:

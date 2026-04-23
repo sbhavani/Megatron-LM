@@ -173,11 +173,6 @@ class InferenceSpecProvider(BackendSpecProvider):
         self, rms_norm: bool = False, for_qk: bool = False, has_residual: bool = False
     ) -> LayerNormBuilder:
         """Which module to use for layer norm"""
-        if for_qk and not is_te_min_version("1.9.0"):
-            # TENorm significantly harms convergence when used
-            # for QKLayerNorm if TE Version < 1.9;
-            # we instead use the Apex implementation.
-            return not_none(FusedLayerNorm)
         return TENorm
 
     def core_attention(self) -> type[TEDotProductAttention]:

@@ -360,8 +360,6 @@ def initialize_rng_tracker(
     # Get the base tracker class
     base_tracker = None
     if HAVE_TE and use_te_rng_tracker:
-        if not is_te_min_version("1.5.0"):
-            raise RuntimeError("use_te_rng_tracker requires TransformerEngine version >= 1.5")
         from megatron.core.extensions.transformer_engine import TECudaRNGStatesTracker
 
         base_tracker = TECudaRNGStatesTracker
@@ -418,7 +416,7 @@ def get_all_rng_states():
     if isinstance(_CUDA_RNG_STATE_TRACKER, CudaRNGStatesTracker):
         return _CUDA_RNG_STATE_TRACKER.states_
     # If TE is installed, check if we are using TE's RNG tracker
-    elif HAVE_TE and is_te_min_version("1.5.0"):
+    elif HAVE_TE:
         from megatron.core.extensions.transformer_engine import TECudaRNGStatesTracker
 
         if isinstance(_CUDA_RNG_STATE_TRACKER, TECudaRNGStatesTracker):
@@ -486,7 +484,7 @@ def model_parallel_cuda_manual_seed(
 
 def is_graph_safe_cuda_rng_tracker(cuda_rng_tracker):
     """Check if the cuda rng tracker is graph safe version."""
-    if HAVE_TE and is_te_min_version("1.5.0"):
+    if HAVE_TE:
         from megatron.core.extensions.transformer_engine import TECudaRNGStatesTracker
 
         if isinstance(cuda_rng_tracker, TECudaRNGStatesTracker):
