@@ -113,6 +113,12 @@ def _apply_rotary_pos_emb_bshd(
     t, t_pass = t[..., :rot_dim], t[..., rot_dim:]
 
     if multi_latent_attention:
+        # Multi-Latent Attention (MLA) implementation generates position embeddings
+        # in an interleaved layout (pairs adjacent: [x0, y0, x1, y1...]).
+        # However, Megatron-LM's default RoPE implementation (with rotary_interleaved=False)
+        # expects a sectional layout (first half real, second half imaginary: [x0, x1..., y0, y1...]).
+        # This block converts the interleaved input to the sectional layout required
+        # for the subsequent _rotate_half operation.
         x1 = t[..., 0::2]
         x2 = t[..., 1::2]
         t = torch.cat((x1, x2), dim=-1)
